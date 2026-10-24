@@ -6,6 +6,6 @@ Comment=Übersetzer Deutsch ⇄ Englisch und mehr – per Maus in der Bildschirm
 Exec=@EXEC@ %F
 Icon=linguist
 Terminal=false
-Categories=Utility;Office;
+Categories=Utility;
 Keywords=übersetzer;translate;wörterbuch;dictionary;dict;englisch;
 StartupWMClass=de.invincible.Linguist

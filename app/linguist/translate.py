@@ -597,6 +597,8 @@ class Translator(Gtk.Revealer):
         self.prefs, self.save_prefs = prefs, save_prefs
         self.on_copied = None            # callback(text) nach dem Kopieren
         self.on_pin = None               # callback(aktiv) – nur im Popup
+        self.on_insert = None            # callback(text): Wort ins Textfeld der App darunter einfügen (Popup)
+        self.insert_enabled = lambda: False
         self.dict = Dictionary()
         self.wd = {}                     # Sprache → WikDict
         self.lang_mode = False           # Sprachliste statt Ergebnissen
@@ -611,7 +613,7 @@ class Translator(Gtk.Revealer):
             box.add_css_class("trx-plain")
             box.set_vexpand(True)
         elif mode == "popup":
-            box.set_size_request(420, -1)
+            box.set_size_request(560, -1)
         head = Gtk.Box(spacing=4)
         t = Gtk.Label(label="übersetzer", xalign=0, hexpand=True)
         t.add_css_class("trx-title")
@@ -663,7 +665,7 @@ class Translator(Gtk.Revealer):
         self.results = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
                                          propagate_natural_height=mode != "window",
-                                         max_content_height=380 if mode != "window" else -1,
+                                         max_content_height=(520 if mode == "popup" else 380) if mode != "window" else -1,
                                          vexpand=mode == "window")
         self.scroll.set_child(self.results)
         box.append(self.scroll)
@@ -897,8 +899,10 @@ class Translator(Gtk.Revealer):
         lg = self.lang()
         name = i18n.tr(LANGS.get(lg, lg)).lower()
         if not q:
-            self.label(i18n.tr("Tippe ein Wort – deutsch oder {}. Ein Klick auf eine Übersetzung kopiert sie, "
-                               "Enter kopiert die erste (oder übersetzt online).", name), "trx-empty")
+            how = ("Ein Klick auf eine Übersetzung fügt sie ein, Enter fügt die erste ein (oder übersetzt online)."
+                   if self.insert_enabled() else
+                   "Ein Klick auf eine Übersetzung kopiert sie, Enter kopiert die erste (oder übersetzt online).")
+            self.label(i18n.tr("Tippe ein Wort – deutsch oder {}. ", name) + i18n.tr(how), "trx-empty")
             return False
         direction = self.settings().get("dir", "auto")
         direction = {"en": lg}.get(direction, direction)
@@ -933,7 +937,9 @@ class Translator(Gtk.Revealer):
         flow = Gtk.Box()
         flow.set_layout_manager(WrapLayout(spacing=4, row_spacing=3))
         for word, art, hint in m["words"]:
-            b = Gtk.Button(focus_on_click=False, tooltip_text=i18n.tr("„{}“ kopieren", word))
+            ins = self.insert_enabled()
+            b = Gtk.Button(focus_on_click=False,
+                           tooltip_text=i18n.tr("„{}“ einfügen" if ins else "„{}“ kopieren", word))
             b.add_css_class("trx-word")
             inner = Gtk.Box(spacing=4)
             if art:
@@ -946,9 +952,9 @@ class Translator(Gtk.Revealer):
                 h.add_css_class("trx-art")
                 inner.append(h)
             b.set_child(inner)
-            b.connect("clicked", lambda _b, w=word: self.copy(w))
+            b.connect("clicked", lambda _b, w=word: self.pick(w))
             b.set_cursor_from_name("pointer")
-            flow.append(b)
+            flow.append(self.with_copy(b, word) if ins else b)
             if self.first is None:
                 self.first = word
         row.append(flow)
@@ -958,8 +964,32 @@ class Translator(Gtk.Revealer):
         row.set_margin_bottom(3)
         self.results.append(row)
 
+    def with_copy(self, main, text, expand=False):
+        """Knopf + kleiner Kopierknopf rechts daneben, der nur beim Überfahren sichtbar wird."""
+        cp = Gtk.Button(label="󰆏", focus_on_click=False, tooltip_text=i18n.tr("kopieren"), valign=Gtk.Align.CENTER)
+        cp.add_css_class("trx-dir")
+        cp.connect("clicked", lambda *_: self.copy(text, closing=False))
+        rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.CROSSFADE, transition_duration=90, child=cp)
+        row = Gtk.Box(spacing=3)
+        row.append(main)
+        row.append(rev)
+        m = Gtk.EventControllerMotion()
+        m.connect("enter", lambda *_: rev.set_reveal_child(True))
+        m.connect("leave", lambda *_: rev.set_reveal_child(False))
+        row.add_controller(m)
+        return row
+
+    def pick(self, text):
+        """Klick/Enter: im Popup ins Textfeld der App darunter einfügen, sonst kopieren."""
+        if self.on_insert and self.insert_enabled():
+            self.status.set_label(i18n.tr("eingefügt: {}", text))
+            self.on_insert(text)
+        else:
+            self.copy(text)
+
     def phrase(self, src, tgt):
-        b = Gtk.Button(focus_on_click=False, tooltip_text="Übersetzung kopieren")
+        ins = self.insert_enabled()
+        b = Gtk.Button(focus_on_click=False, tooltip_text="Übersetzung einfügen" if ins else "Übersetzung kopieren")
         b.add_css_class("trx-phrase")
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         s = Gtk.Label(label=src, xalign=0, wrap=True, max_width_chars=48)
@@ -969,9 +999,13 @@ class Translator(Gtk.Revealer):
         inner.append(t)
         b.set_child(inner)
         plain = re.sub(r"\s+", " ", NOTE.sub(" ", tgt)).strip()
-        b.connect("clicked", lambda *_: self.copy(plain))
+        b.connect("clicked", lambda *_: self.pick(plain))
         b.set_cursor_from_name("pointer")
-        self.results.append(b)
+        if ins:
+            b.set_hexpand(True)
+            self.results.append(self.with_copy(b, plain))
+        else:
+            self.results.append(b)
 
     def online_button(self, q, primary=False):
         b = Gtk.Button(label="󰖟 online übersetzen (MyMemory) ⏎" if primary else "󰖟 online übersetzen (MyMemory)",
@@ -1042,14 +1076,14 @@ class Translator(Gtk.Revealer):
             self.queue(0)
         install(progress, done)
 
-    def copy(self, text):
+    def copy(self, text, closing=True):
         self.get_clipboard().set(text)
         self.status.set_label(i18n.tr("kopiert: {}", text))
         self.status.add_css_class("trx-ok")
         GLib.timeout_add(1600, lambda: (self.status.remove_css_class("trx-ok"), False)[1])
-        if self.on_copied:
+        if self.on_copied and closing:
             self.on_copied(text)
 
     def copy_first(self):
         if self.first:
-            self.copy(self.first)
+            self.pick(self.first)

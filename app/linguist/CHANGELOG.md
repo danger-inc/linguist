@@ -1,5 +1,19 @@
 # linguist – Änderungen
 
+## 1.2.0 (2026-10-24)
+- **Wort direkt einfügen**: In der Hover-Karte setzt **Enter** das beste Wort und ein **Klick** auf ein Wort oder eine
+  Wendung die Übersetzung an die Cursorstelle der App darunter (z. B. notist) – per Strg+V an das
+  Fenster, das vorher den Fokus hatte (Terminals: Strg+Umschalt+V). Braucht Hyprland oder wtype; abschaltbar in den
+  Einstellungen („klick / enter fügt … ein“), dann wird wie bisher kopiert.
+- **Kopier-Knopf rechts**: Fährst du über einen Treffer, erscheint rechts daneben 󰆏 – kopiert nur.
+- Die Hover-Karte geht noch schneller zu, sobald die Maus weg ist.
+
+## 1.1.0 (2026-10-24)
+- **Einstellungen oben rechts**: Das Zahnrad 󰒓 neben dem Versionsknopf öffnet sie (Strg+Komma, Esc geht zurück) –
+  wie in den anderen Apps der Suite, nicht mehr als eigener Tab.
+- **Hover-Karte größer** (breiter, mehr Ergebnisse sichtbar) und **verschwindet schneller**, sobald die Maus weg ist.
+- Erscheint im Starter (Super+R).
+
 ## 1.0.0 (2026-10-24)
 - **Der Übersetzer der Suite als eigene App**: Wörterbuch Deutsch ⇄ Englisch offline (TU Chemnitz, mit notist
   geteilt), weitere Sprachen aus Wiktionary zum Nachladen, ganze Sätze auf Klick/Enter online (MyMemory).

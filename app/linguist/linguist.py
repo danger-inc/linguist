@@ -47,7 +47,7 @@ import translate  # noqa: E402
 
 hotcorner.PRELOADED = PRELOADED
 APP_ID = "de.invincible.Linguist"
-DEFAULTS = {"hover": False, "corner": "bottom-right", "delay": 160, "close_on_copy": True, "translator": {}}
+DEFAULTS = {"hover": False, "insert": True, "corner": "bottom-right", "delay": 160, "close_on_copy": True, "translator": {}}
 DELAYS = [(0, "sofort"), (160, "kurz"), (350, "mittel"), (600, "lang")]
 
 CSS = """
@@ -256,9 +256,16 @@ class Linguist(Gtk.Application):
             self.build()
         getattr(glass, "bring_here", lambda w: None)(self.win)
         self.win.present()
-        self.win.show_tab(tab)
+        self.show_page(tab)
         if text:
             self.tr.entry.set_text(text.strip()[:500])
+
+    def show_page(self, page):
+        """Übersetzer oder Einstellungen (Zahnrad oben rechts) – die Einstellungen sind keine eigene Tab-Seite."""
+        self.win.stack.set_visible_child_name(page)
+        (self.gear.add_css_class if page == "set" else self.gear.remove_css_class)("on")
+        if page == "trans":
+            GLib.idle_add(lambda: (self.tr.entry.grab_focus(), False)[1])
 
     def refresh_window(self):
         self.tr.reload_prefs()
@@ -266,16 +273,23 @@ class Linguist(Gtk.Application):
         GLib.idle_add(lambda: (self.win.current_tab() == "trans" and self.tr.toggle(True), False)[1])
 
     def build(self):
-        win = LinguistWindow(self, "linguist", [("trans", "übersetzer", "󰗊"), ("set", "einstellungen", "󰒓")],
+        win = LinguistWindow(self, "linguist", [("trans", "übersetzer", "󰗊")],
                              size=(560, 640), hints=(("esc", "leeren/zu"), ("enter", "kopieren")))
         self.win = win
         win.add_changelog("linguist", HERE)
+        self.gear = tui.Button("󰒓", lambda: self.show_page("trans" if win.current_tab() == "set" else "set"),
+                               tooltip="Einstellungen (Strg+,)")
+        win.header_extra.append(self.gear)
         self.tr = translate.Translator(self.cfg, self.save_cfg, mode="window")
         self.tr.on_toggled = lambda on: None if on else win.close()
         win.add_page("trans", self.tr, scroll=False)
         win.add_page("set", self.build_settings())
-        win.on_tab = lambda tid: tid == "trans" and GLib.idle_add(lambda: (self.tr.entry.grab_focus(), False)[1])
-        for name, cb, keys in (("close", lambda *_: win.close(), ["<Control>w"]),):
+        esc = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        esc.connect("key-pressed", lambda c, kv, *_: kv == Gdk.KEY_Escape and win.current_tab() == "set"
+                    and (self.show_page("trans") or True))
+        win.add_controller(esc)
+        for name, cb, keys in (("close", lambda *_: win.close(), ["<Control>w"]),
+                               ("settings", lambda *_: self.show_page("set"), ["<Control>comma"])):
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", cb)
             win.add_action(act)
@@ -299,6 +313,12 @@ class Linguist(Gtk.Application):
         self.close_check = tui.Check("nach dem kopieren wieder zugehen", self.cfg["close_on_copy"],
                                      lambda on: self.set_cfg("close_on_copy", on))
         p.body.append(self.close_check)
+        self.insert_check = tui.Check("klick / enter fügt das wort an der cursorstelle ein (sonst kopieren)",
+                                      self.cfg["insert"], lambda on: self.set_cfg("insert", on),
+                                      tooltip="Gilt für die Hover-Karte: Das Wort landet im Textfeld der App darunter "
+                                              "(per Strg+V; braucht Hyprland oder wtype). Das Kopier-Symbol rechts "
+                                              "neben jedem Treffer kopiert nur.")
+        p.body.append(self.insert_check)
         self.support_lbl = tui.label("", "dim", wrap=True)
         p.body.append(self.support_lbl)
         page.append(p)
@@ -326,6 +346,7 @@ class Linguist(Gtk.Application):
         self.hover_check.set_active(bool(self.cfg.get("hover")))
         self.on_check.set_active(self.hover_on())
         self.close_check.set_active(bool(self.cfg.get("close_on_copy", True)))
+        self.insert_check.set_active(bool(self.cfg.get("insert", True)))
         self.corner_sel.set_options(hotcorner.CORNERS, self.corner())
         d = int(self.cfg.get("delay", 160))
         self.delay_sel.set_options(DELAYS, d if d in dict(DELAYS) else 160)

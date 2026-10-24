@@ -1,6 +1,6 @@
 # Hover-Übersetzer: unsichtbarer Auslöser in der Bildschirmecke (layer-shell, je Monitor) und die Popup-Karte,
 # die auftaucht, wenn die Maus dort ankommt. Verschwindet wieder, wenn die Maus weg ist (außer angepinnt).
-import json, os, socket
+import json, os, shutil, socket, subprocess
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -49,6 +49,47 @@ def cursor_pos():
         return d["x"], d["y"]
     except (OSError, ValueError, KeyError):
         return None
+
+
+def hypr_json(cmd):
+    """Anfrage an den Hyprland-Socket (z. B. "j/activewindow") → JSON oder None."""
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if not sig:
+        return None
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            s.connect(f"{RUNTIME}/hypr/{sig}/.socket.sock")
+            s.sendall(cmd.encode())
+            data = b""
+            while chunk := s.recv(4096):
+                data += chunk
+        return json.loads(data)
+    except (OSError, ValueError):
+        return None
+
+
+def can_insert():
+    """Einfügen ins Textfeld der App darunter: per Hyprland (send_shortcut) oder wtype."""
+    return bool(os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and shutil.which("hyprctl")) or \
+        bool(shutil.which("wtype"))
+
+
+TERMINALS = ("kitty", "foot", "alacritty", "wezterm", "konsole", "gnome-terminal", "xterm", "ghostty", "terminator",
+             "tilix", "st-256color", "org.wezfurlong.wezterm", "com.mitchellh.ghostty")
+
+
+def send_paste(target):
+    """Strg+V (im Terminal Strg+Umschalt+V) an das Fenster schicken, das vor der Karte den Fokus hatte."""
+    cls = ((target or {}).get("class") or "").lower()
+    mods = "CTRL SHIFT" if any(t in cls for t in TERMINALS) else "CTRL"
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and shutil.which("hyprctl"):
+        win = f', window = "address:{target["address"]}"' if target and target.get("address") else ""
+        subprocess.Popen(["hyprctl", "dispatch", f'hl.dsp.send_shortcut({{ mods = "{mods}", key = "V"{win} }})'],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif shutil.which("wtype"):
+        args = ["wtype", "-M", "ctrl"] + (["-M", "shift"] if "SHIFT" in mods else []) + ["-k", "v"]
+        subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def edges(corner):
@@ -122,9 +163,9 @@ class Corner:
 class Popup:
     """Die Karte selbst: layer-shell-Fenster in der Ecke mit der Übersetzer-Karte. Ohne layer-shell ein kleines
     normales Fenster (kein Hover, aber `linguist --popup` geht trotzdem)."""
-    GRACE_MS = 900            # so lange darf die Maus weg sein, bevor die Karte verschwindet
-    GRACE_TEXT_MS = 2500      # … wenn schon etwas getippt wurde
-    TRAVEL_MS = 1500          # anfangs Zeit, von der Ecke auf die Karte zu fahren
+    GRACE_MS = 180            # so lange darf die Maus weg sein, bevor die Karte verschwindet
+    GRACE_TEXT_MS = 600      # … wenn schon etwas getippt wurde
+    TRAVEL_MS = 450           # anfangs Zeit, von der Ecke auf die Karte zu fahren
 
     def __init__(self, app, cfg, save_cfg, get_corner, close_on_copy):
         self.cfg, self.get_corner, self.close_on_copy = cfg, get_corner, close_on_copy
@@ -140,6 +181,9 @@ class Popup:
         self.tr.on_toggled = lambda on: None if on else self.hide()
         self.tr.on_copied = self.copied
         self.tr.on_pin = self.set_pinned
+        self.target = None                # Fenster, das vor der Karte den Fokus hatte (hier landet „einfügen“)
+        self.tr.on_insert = self.insert
+        self.tr.insert_enabled = lambda: bool(cfg.get("insert", True)) and can_insert() and bool(self.target)
         if self.layer:
             Layer.init_for_window(self.win)
             Layer.set_namespace(self.win, "linguist-popup")
@@ -147,7 +191,7 @@ class Popup:
             Layer.set_exclusive_zone(self.win, 0)
             Layer.set_keyboard_mode(self.win, Layer.KeyboardMode.NONE)    # Tastatur nur, solange die Karte offen ist
         else:
-            self.win.set_default_size(440, -1)
+            self.win.set_default_size(600, -1)
         self.win.set_child(self.tr)
         m = Gtk.EventControllerMotion()
         m.connect("enter", lambda *_: self.cancel_hide())
@@ -195,6 +239,8 @@ class Popup:
         self.monitor = monitor or self.monitor
         was_open = self.is_open()
         if not was_open:
+            w = hypr_json("j/activewindow")
+            self.target = w if isinstance(w, dict) and w.get("address") and w.get("class") != "de.invincible.Linguist" else None
             self.tr.pin_btn.set_active(bool(sticky))
             self.pinned = bool(sticky)
             self.tr.reload_prefs()
@@ -232,10 +278,29 @@ class Popup:
             self.outside_ms = 0
             self.watch_id = GLib.timeout_add(150, self.watch)
 
+    def insert(self, text):
+        """Wort an die Cursorstelle des Fensters darunter setzen: Zwischenablage + Strg+V an dieses Fenster."""
+        self.tr.get_clipboard().set(text)
+        target = self.target
+        self.cancel_hide()
+        if self.layer:
+            Layer.set_keyboard_mode(self.win, Layer.KeyboardMode.NONE)    # Tastatur zurück an das Fenster darunter
+
+        def paste():
+            send_paste(target)
+            if self.pinned:                                               # angepinnt: Karte bleibt, Tastatur zurück
+                if self.layer:
+                    GLib.timeout_add(250, lambda: (Layer.set_keyboard_mode(self.win, Layer.KeyboardMode.EXCLUSIVE),
+                                                   self.tr.entry.grab_focus(), False)[2])
+            else:
+                self.hide()
+            return False
+        GLib.timeout_add(120, paste)
+
     def copied(self, text):
         if self.close_on_copy() and not self.pinned:
             self.cancel_hide()
-            self.hide_id = GLib.timeout_add(700, lambda: (self.hide(), False)[1])
+            self.hide_id = GLib.timeout_add(500, lambda: (self.hide(), False)[1])
 
     # ----- Maus weg → zu -----
     def cancel_hide(self):

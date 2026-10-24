@@ -21,7 +21,7 @@ Autostart im Hintergrund (nötig für die Bildschirmecke).
 - **Fenster** (`linguist`, am besten Super+T): Wort oder Satz tippen, ein Klick auf eine Übersetzung kopiert sie,
   Enter kopiert die erste (oder übersetzt online). Sprache und Richtung oben; weitere Sprachen (WikDict) per Klick laden.
 - **Hover-Übersetzer** (Einstellungen → *hover-übersetzer*, standardmäßig aus): Maus in die Ecke schieben und kurz
-  warten. Tippen, Enter/Klick kopiert. Maus weg oder Esc schließt, 󰐃 pinnt die Karte fest. Ecke, Verweilzeit und
+  warten. Tippen, Enter/Klick setzt das Wort an die Cursorstelle der App darunter (󰆏 rechts kopiert nur). Maus weg oder Esc schließt, 󰐃 pinnt die Karte fest. Ecke, Verweilzeit und
   „nach dem Kopieren zugehen“ sind einstellbar.
 - **In den anderen Apps** (notist, mailist): Ist der Hover-Übersetzer aktiviert, zeigt der Knopf „übersetzer“, ob er an
   ist (Klick = an/aus, Rechtsklick = Einstellungen, Strg+Umschalt+T = markierten Text in der Karte übersetzen). Ist er
