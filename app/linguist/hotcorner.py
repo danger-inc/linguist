@@ -105,6 +105,8 @@ class Corner:
     def __init__(self, app, monitor, corner, on_hit, on_leave):
         self.monitor, self.corner, self.on_hit, self.on_leave = monitor, corner, on_hit, on_leave
         self.timer = None
+        self.rearm_id = None
+        self.blocked = False              # nach einem Treffer taub, bis die Maus die Ecke wieder verlassen hat
         self.delay = 160
         self.win = Gtk.Window(application=app, resizable=False, decorated=False)
         self.win.add_css_class("ling-trigger")
@@ -131,12 +133,35 @@ class Corner:
 
     def enter(self, *_):
         self.cancel()
+        if self.blocked:
+            return
         self.timer = GLib.timeout_add(max(self.delay, 1), self.fire)    # kurz verweilen: kein Aufpoppen im Vorbeiziehen
 
     def fire(self):
         self.timer = None
+        self.blocked = True
+        if self.rearm_id is None:
+            self.rearm_id = GLib.timeout_add(150, self.rearm)
         self.on_hit(self.monitor)
         return False
+
+    def rearm(self):
+        """Wieder scharf, sobald der Zeiger mehr als 80 px von der Ecke weg ist (ohne Socket: nach 1 s)."""
+        pos = cursor_pos()
+        if pos is None:
+            self.rearm_waited = getattr(self, "rearm_waited", 0) + 150
+            far = self.rearm_waited >= 1000
+        else:
+            g = self.monitor.get_geometry()
+            cx = g.x + (g.width if self.corner.endswith("right") else 0)
+            cy = g.y + (g.height if self.corner.startswith("bottom") else 0)
+            far = abs(pos[0] - cx) > 80 or abs(pos[1] - cy) > 80
+        if far:
+            self.blocked = False
+            self.rearm_id = None
+            self.rearm_waited = 0
+            return False
+        return True
 
     def leave(self, *_):
         self.cancel()
@@ -157,6 +182,9 @@ class Corner:
 
     def destroy(self):
         self.cancel()
+        if self.rearm_id is not None:
+            GLib.source_remove(self.rearm_id)
+            self.rearm_id = None
         self.win.destroy()
 
 
@@ -280,7 +308,7 @@ class Popup:
 
     def insert(self, text):
         """Wort an die Cursorstelle des Fensters darunter setzen: Zwischenablage + Strg+V an dieses Fenster."""
-        self.tr.get_clipboard().set(text)
+        self.tr.get_clipboard().set(text + " ")                          # Leerzeichen dahinter: man schreibt gleich weiter
         target = self.target
         self.cancel_hide()
         if self.layer:
@@ -288,12 +316,7 @@ class Popup:
 
         def paste():
             send_paste(target)
-            if self.pinned:                                               # angepinnt: Karte bleibt, Tastatur zurück
-                if self.layer:
-                    GLib.timeout_add(250, lambda: (Layer.set_keyboard_mode(self.win, Layer.KeyboardMode.EXCLUSIVE),
-                                                   self.tr.entry.grab_focus(), False)[2])
-            else:
-                self.hide()
+            self.hide()                                                   # nach dem Einfügen zu (auch angepinnt): weiterschreiben
             return False
         GLib.timeout_add(120, paste)
 
