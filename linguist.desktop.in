@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=linguist
+GenericName=Übersetzer
+Comment=Übersetzer Deutsch ⇄ Englisch und mehr – per Maus in der Bildschirmecke
+Exec=@EXEC@ %F
+Icon=linguist
+Terminal=false
+Categories=Utility;Office;
+Keywords=übersetzer;translate;wörterbuch;dictionary;dict;englisch;
+StartupWMClass=de.invincible.Linguist
