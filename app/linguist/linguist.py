@@ -366,6 +366,9 @@ def main(argv):
     while i < len(args):
         a = args[i]
         if a == "--daemon":
+            app.register(None)
+            if app.get_is_remote():           # läuft schon (z. B. zweiter Autostart gleichzeitig): nichts zeigen
+                return 0
             app.daemon = True
             app.held_daemon = True
         elif a == "--toggle":
