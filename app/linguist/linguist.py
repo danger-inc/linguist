@@ -299,6 +299,7 @@ class Linguist(Gtk.Application):
         page = tui.vbox(spacing=8)
         page.set_margin_top(6)
         page.set_margin_bottom(10)
+        page.append(tui.theme_panel())
         p = tui.Panel("hover-übersetzer")
         self.hover_check = tui.Check("maus in die ecke → linguist taucht auf", self.cfg["hover"],
                                      lambda on: self.set_cfg("hover", on))
