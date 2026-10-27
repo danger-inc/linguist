@@ -33,7 +33,7 @@ mkdir -p "$DIR" "$RICE/fonts" "$BIN" "$APPS" "$ICONS"
 cp -f "$SRC"/app/linguist/*.py "$SRC"/app/linguist/VERSION "$SRC"/app/linguist/CHANGELOG.md "$DIR/"
 install -m 755 "$SRC/linguist.sh" "$DIR/linguist.sh"
 chmod +x "$DIR/linguist.py"
-cp -f "$SRC/app/tui.py" "$SRC/app/glass.py" "$SRC/app/istheme.py" "$SRC/app/changelog.py" "$SRC/app/swipe.py" "$RICE/"   # gemeinsame Bausteine
+cp -f "$SRC/app/tui.py" "$SRC/app/glass.py" "$SRC/app/istheme.py" "$SRC/app/ist-swipe.py" "$SRC/app/changelog.py" "$SRC/app/swipe.py" "$RICE/"   # gemeinsame Bausteine
 cp -f "$SRC"/app/fonts/* "$RICE/fonts/"                           # Symbolschrift (Icons ohne Nerd Font)
 ln -sf "$DIR/linguist.sh" "$BIN/linguist"
 sed "s|@EXEC@|$BIN/linguist|g" "$SRC/linguist.desktop.in" > "$APPS/linguist.desktop"
