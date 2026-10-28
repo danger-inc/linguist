@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Starter für linguist. Läuft es schon im Hintergrund, geht der Aufruf direkt per D-Bus hin.
 #   linguist [wort]  ·  --toggle (Super+T)  ·  --popup [text]  ·  --selection  ·  --settings
+#   linguist --ocr (Bildschirmbereich markieren → Text erkennen → übersetzen)  ·  --clipboard (Zwischenablage übersetzen)
 #   linguist --hover on|off|toggle  ·  --daemon (Autostart)  ·  --quit
 APP=de.invincible.Linguist
 OBJ=/de/invincible/Linguist
@@ -34,7 +35,20 @@ start() {
     setsid -f "$PY" "$D/linguist.py" "$@" >>"$LOG" 2>&1 </dev/null
 }
 
+ocr() {
+    local miss; for t in slurp grim tesseract; do command -v $t >/dev/null || miss="$miss $t"; done
+    [ -n "$miss" ] && { notify-send -a linguist "linguist --ocr braucht:$miss" 2>/dev/null; return 1; }
+    local region langs=deu+eng text
+    region=$(slurp -d 2>/dev/null) || return 0          # Esc beim Markieren = abbrechen
+    tesseract --list-langs 2>/dev/null | grep -qx deu || langs=eng
+    text=$(grim -g "$region" - | tesseract stdin stdout -l "$langs" --psm 6 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
+    if [ -n "$text" ]; then exec "$0" --popup "$text"; fi
+    notify-send -a linguist -t 2000 "linguist: kein Text erkannt" 2>/dev/null
+}
+
 case "${1:-}" in
+    --ocr)       ocr; exit 0 ;;
+    --clipboard) t=$(wl-paste -n 2>/dev/null); [ -n "$t" ] && exec "$0" --popup "$t"; exit 0 ;;
     --hover)     exec "$PY" "$D/linguist.py" "$@" ;;       # nur Zustand schreiben (kein GTK nötig)
     --daemon)    running || start --daemon; exit 0 ;;
     --quit)      running && action quit; exit 0 ;;

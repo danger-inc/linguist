@@ -5,6 +5,8 @@
 #   linguist [wort]        Fenster       linguist --toggle      Fenster ein/aus
 #   linguist --popup [t]   Karte unten rechts (angepinnt) – mit Text gleich übersetzen
 #   linguist --selection   Karte mit dem markierten Text (Primärauswahl, sonst Zwischenablage)
+#   linguist --ocr         Bildschirmbereich markieren, Text erkennen (tesseract) und übersetzen
+#   linguist --clipboard   Zwischenablage übersetzen
 #   linguist --hover on|off|toggle   Hover ein-/ausschalten (wie der Knopf „übersetzer“ in den Apps)
 #   linguist --settings    Einstellungen     linguist --daemon / --quit
 import json, os, shutil, subprocess, sys
@@ -332,6 +334,8 @@ class Linguist(Gtk.Application):
         for cmd, what in (("linguist --toggle", "Fenster ein/aus (Super+T)"),
                           ("linguist --selection", "markierten Text übersetzen (Karte unten rechts)"),
                           ("linguist --popup wort", "Karte mit Wort öffnen"),
+                          ("linguist --ocr", "Bereich auf dem Bildschirm markieren, Text erkennen und übersetzen"),
+                          ("linguist --clipboard", "Zwischenablage übersetzen"),
                           ("linguist --hover toggle", "Hover an/aus")):
             k.body.append(tui.hbox(tui.label(cmd, "accent"), tui.label(what, "dim"), spacing=10))
         page.append(k)

@@ -1,5 +1,13 @@
 # linguist – Änderungen
 
+## 1.5.0 (2026-10-29)
+- **Verlauf**: Bei leerem Suchfeld stehen die zuletzt nachgeschlagenen Wörter samt erster Übersetzung da – ein Klick schlägt sie noch einmal nach, ✕ nimmt einen Eintrag heraus, „leeren“ löscht alles.
+- **Vokabeln**: Fährst du über einen Treffer, erscheint **☆** – ein Klick merkt ihn (★). Der Stern oben rechts zeigt alle gemerkten Wörter, kopiert sie als Tabelle (für Anki/Quizlet) und startet **Karteikarten**: aufdecken, „gewusst“ → die Karte kommt nach 1, 3, 7, 14, 30 Tagen wieder, „noch nicht“ gleich nochmal.
+- **Online-Übersetzungen werden gemerkt**: Was schon einmal übersetzt wurde, kommt beim nächsten Mal sofort und ohne Netz.
+- **Alt+D** schaltet die Richtung weiter (auto → de → en).
+- **Neue Auslöser**: `linguist --ocr` (Bereich auf dem Bildschirm markieren, Text wird erkannt und übersetzt; Super+Umschalt+O) und `linguist --clipboard` (Zwischenablage übersetzen). Für OCR braucht es slurp, grim und tesseract.
+- Alles liegt lokal in `~/.config/linguist` (history.json, vocab.json, online-cache.json).
+
 ## 1.4.0 (2026-10-27)
 - **Wechsel-Animation**: Der Wechsel zwischen Hell und Dunkel (und zwischen Designs) läuft als Scanbalken über den ganzen Bildschirm. Alle Fenster, die Leiste und das Terminal wechseln darunter im selben Moment, hinter dem Balken steht das neue Design. An/aus und Dauer (Standard 1,5 s) stehen in der Designauswahl der Einstellungen.
 

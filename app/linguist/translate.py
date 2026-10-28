@@ -14,6 +14,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 import i18n  # noqa: E402
 import paths  # noqa: E402
+import vocab  # noqa: E402
 
 DICT_DIR = os.path.join(paths.HOME, "dict")
 DB = os.path.join(DICT_DIR, "de-en.sqlite")
@@ -571,6 +572,8 @@ CSS = """
 .trx .trx-foot { font-size: 10px; color: alpha(@foreground, 0.45); margin-top: 4px; }
 .trx .trx-ok { color: @primary; font-weight: 800; }
 .trx .trx-empty { color: alpha(@foreground, 0.6); margin: 8px 0; }
+.trx .trx-card { font-size: 20px; margin: 18px 4px 6px 4px; }
+.trx .trx-star { color: @primary; }
 .trx progressbar trough { min-height: 4px; } .trx progressbar progress { min-height: 4px; background-color: @primary; }
 """
 
@@ -602,6 +605,10 @@ class Translator(Gtk.Revealer):
         self.dict = Dictionary()
         self.wd = {}                     # Sprache → WikDict
         self.lang_mode = False           # Sprachliste statt Ergebnissen
+        self.page = ""                   # "" Suche · "vocab" gemerkte Wörter · "learn" Karteikarten üben
+        self.learn = None
+        self._cq, self._cdir = "", ""    # aktuelle Suche / Richtung der gezeigten Treffer (für ★ und Verlauf)
+        self._hist_timer = 0
         self.online_btn = None
         self._fresh = False              # nach einer Suche: nächster Klick ins Feld markiert alles
         self.on_toggled = None
@@ -637,6 +644,11 @@ class Translator(Gtk.Revealer):
             b.connect("toggled", lambda btn, k=key: btn.get_active() and self.set_dir(k))
             self.dir_btns[key] = b
             head.append(b)
+        self.vocab_btn = Gtk.ToggleButton(label="󰓎", focus_on_click=False,
+                                          tooltip_text="Gemerkte Wörter – ★ neben einem Treffer merkt ihn; hier üben")
+        self.vocab_btn.add_css_class("trx-dir")
+        self.vocab_btn.connect("toggled", lambda b: self.show_page("vocab" if b.get_active() else ""))
+        head.append(self.vocab_btn)
         if mode == "popup":
             self.pin_btn = Gtk.ToggleButton(label="󰐃", tooltip_text="Angepinnt: bleibt offen, auch wenn die Maus weggeht",
                                             focus_on_click=False)
@@ -803,6 +815,8 @@ class Translator(Gtk.Revealer):
         if not self.entry.get_text() and self.is_open() and not self.entry_focused():
             self.entry.grab_focus()            # ✕ gedrückt → gleich weiterschreiben
         self._fresh = False
+        if self.page and self.entry.get_text():
+            self.show_page("", requeue=False)           # wer tippt, will suchen
         self.queue()
 
     def entry_focused(self):
@@ -823,6 +837,9 @@ class Translator(Gtk.Revealer):
 
     def on_enter(self):
         """Enter: steht „online übersetzen“ als Hauptweg da (kein Treffer oder ganzer Satz), los – sonst kopieren."""
+        if self.page == "learn":
+            self.learn_enter()
+            return
         b = self.online_btn
         if b is not None and b.get_parent() is not None and b.get_visible() and b.get_sensitive() and \
                 (self.first is None or getattr(b, "primary", False)):
@@ -857,7 +874,15 @@ class Translator(Gtk.Revealer):
 
     def on_key(self, ctrl, keyval, code, state):
         if keyval == Gdk.KEY_Escape:
-            self.toggle(False)
+            if self.page:
+                self.show_page("")
+            else:
+                self.toggle(False)
+            return True
+        if state & Gdk.ModifierType.ALT_MASK and keyval in (Gdk.KEY_d, Gdk.KEY_D):      # Alt+D: Richtung weiter
+            order = ["auto", "de", "en"]
+            cur = self.settings().get("dir", "auto")
+            self.dir_btns[order[(order.index(cur) + 1) % 3 if cur in order else 0]].set_active(True)
             return True
         return False
 
@@ -882,8 +907,17 @@ class Translator(Gtk.Revealer):
     def _run(self):
         self._timer = 0
         self.clear()
+        if self._hist_timer:
+            GLib.source_remove(self._hist_timer)
+            self._hist_timer = 0
         if self.lang_mode:
             self.render_langs()
+            return False
+        if self.page == "vocab":
+            self.render_vocab()
+            return False
+        if self.page == "learn":
+            self.render_learn()
             return False
         q = self.entry.get_text().strip()
         if self.lang() != "en":
@@ -903,6 +937,7 @@ class Translator(Gtk.Revealer):
                    if self.insert_enabled() else
                    "Ein Klick auf eine Übersetzung kopiert sie, Enter kopiert die erste (oder übersetzt online).")
             self.label(i18n.tr("Tippe ein Wort – deutsch oder {}. ", name) + i18n.tr(how), "trx-empty")
+            self.render_history()
             return False
         direction = self.settings().get("dir", "auto")
         direction = {"en": lg}.get(direction, direction)
@@ -912,7 +947,9 @@ class Translator(Gtk.Revealer):
             self.label(i18n.tr("Wörterbuch nicht lesbar: {}", str(e)), "trx-empty")
             return False
         both = len(res) > 1
+        self._cq = q
         for r in res:
+            self._cdir = r["dir"]
             if both or direction == "auto":
                 self.label(i18n.tr("deutsch → {}", name) if r["dir"] == "de" else i18n.tr("{} → deutsch", name),
                            "trx-sec")
@@ -930,6 +967,8 @@ class Translator(Gtk.Revealer):
             self.online_button(q, primary=True)
         self.scroll.get_vadjustment().set_value(0)
         self._fresh = True                     # nächster Klick ins Feld markiert alles
+        if res:
+            self._hist_timer = GLib.timeout_add(1800, self._hist_note)      # erst wenn die Eingabe stehen bleibt
         return False
 
     def meaning(self, m):
@@ -954,7 +993,7 @@ class Translator(Gtk.Revealer):
             b.set_child(inner)
             b.connect("clicked", lambda _b, w=word: self.pick(w))
             b.set_cursor_from_name("pointer")
-            flow.append(self.with_copy(b, word) if ins else b)
+            flow.append(self.tools_row(b, word, (self._cq, word, self._cdir), copy=ins))
             if self.first is None:
                 self.first = word
         row.append(flow)
@@ -987,7 +1026,7 @@ class Translator(Gtk.Revealer):
         else:
             self.copy(text)
 
-    def phrase(self, src, tgt):
+    def phrase(self, src, tgt, front=None):
         ins = self.insert_enabled()
         b = Gtk.Button(focus_on_click=False, tooltip_text="Übersetzung einfügen" if ins else "Übersetzung kopieren")
         b.add_css_class("trx-phrase")
@@ -1001,11 +1040,8 @@ class Translator(Gtk.Revealer):
         plain = re.sub(r"\s+", " ", NOTE.sub(" ", tgt)).strip()
         b.connect("clicked", lambda *_: self.pick(plain))
         b.set_cursor_from_name("pointer")
-        if ins:
-            b.set_hexpand(True)
-            self.results.append(self.with_copy(b, plain))
-        else:
-            self.results.append(b)
+        b.set_hexpand(True)
+        self.results.append(self.tools_row(b, plain, (front or src, plain, self._cdir or "online"), copy=ins))
 
     def online_button(self, q, primary=False):
         b = Gtk.Button(label="󰖟 online übersetzen (MyMemory) ⏎" if primary else "󰖟 online übersetzen (MyMemory)",
@@ -1030,7 +1066,16 @@ class Translator(Gtk.Revealer):
             else:
                 src = self.dict.guess(q) if self.dict.open() else \
                     ("de" if re.search(r"[äöüß]", q.lower()) else "en")
-            online(q, src, lambda texts, err: self.show_online(b, texts, err), lang=lg)
+            hit = vocab.cache_get(src, lg, q)
+            if hit:                                  # schon einmal übersetzt: ohne Netz aus dem Zwischenspeicher
+                self.show_online(b, hit, None)
+                return
+
+            def got(texts, err):
+                if texts:
+                    vocab.cache_put(src, lg, q, texts)
+                self.show_online(b, texts, err)
+            online(q, src, got, lang=lg)
         b.connect("clicked", go)
         self.results.append(b)
 
@@ -1043,8 +1088,10 @@ class Translator(Gtk.Revealer):
             return
         self.label("online (mymemory)", "trx-sec")
         for t in texts:
-            self.phrase(t, t)
+            self.phrase(t, t, front=self.entry.get_text().strip())
         self.first = texts[0]                   # Enter kopiert jetzt die Online-Übersetzung
+        self._cq = self.entry.get_text().strip()
+        self.note_history()
         self.online_btn = None
 
     def show_install(self):
@@ -1075,6 +1122,194 @@ class Translator(Gtk.Revealer):
             self.status.set_label(i18n.tr("Fehler: {}", err) if err else i18n.tr("wörterbuch bereit"))
             self.queue(0)
         install(progress, done)
+
+    # ---------- Verlauf ----------
+    def _hist_note(self):
+        self._hist_timer = 0
+        self.note_history()
+        return False
+
+    def note_history(self):
+        q = self.entry.get_text().strip()
+        if q and self.first:
+            vocab.hist_add(q, self.first, self.lang())
+
+    def render_history(self):
+        hist = vocab.hist_list(12)
+        if not hist:
+            return
+        head = Gtk.Box(spacing=6)
+        lab = Gtk.Label(label="zuletzt", xalign=0, hexpand=True)
+        lab.add_css_class("trx-sec")
+        head.append(lab)
+        clr = Gtk.Button(label="󰆴 leeren", focus_on_click=False, tooltip_text="Verlauf löschen")
+        clr.add_css_class("trx-dir")
+        clr.connect("clicked", lambda *_: (vocab.hist_clear(), self.queue(0)))
+        head.append(clr)
+        self.results.append(head)
+        for h in hist:
+            row = Gtk.Box(spacing=4)
+            b = Gtk.Button(focus_on_click=False, hexpand=True, tooltip_text="noch einmal nachschlagen")
+            b.add_css_class("trx-phrase")
+            inner = Gtk.Box(spacing=8)
+            q = Gtk.Label(label=h["q"], xalign=0)
+            a = Gtk.Label(label="→ " + h.get("a", ""), xalign=0, hexpand=True, ellipsize=3)
+            a.add_css_class("trx-ctx")
+            inner.append(q)
+            inner.append(a)
+            b.set_child(inner)
+            b.connect("clicked", lambda _b, t=h["q"]: (self.entry.set_text(t), self.entry.set_position(-1)))
+            row.append(b)
+            x = Gtk.Button(label="󰅖", focus_on_click=False, tooltip_text="aus dem Verlauf nehmen")
+            x.add_css_class("trx-dir")
+            x.connect("clicked", lambda _b, t=h["q"]: (vocab.hist_del(t), self.queue(0)))
+            row.append(x)
+            self.results.append(row)
+
+    # ---------- ★ merken ----------
+    def tools_row(self, main, text, pair, copy=False):
+        """Treffer + beim Überfahren ★ (merken) und – in der Hover-Karte – 󰆏 (nur kopieren)."""
+        q, a, direction = pair
+        lg = self.lang()
+        saved = bool(q) and vocab.vocab_has(q, a, lg)
+        star = Gtk.Button(label="★" if saved else "☆", focus_on_click=False, valign=Gtk.Align.CENTER,
+                          tooltip_text="Als Vokabel merken / wieder entfernen")
+        star.add_css_class("trx-dir")
+        star.add_css_class("trx-star")
+
+        def toggle(*_):
+            on = vocab.vocab_toggle(q, a, lg, direction)
+            star.set_label("★" if on else "☆")
+            self.status.set_label(i18n.tr("gemerkt: {}", a) if on else i18n.tr("entfernt: {}", a))
+        star.connect("clicked", toggle)
+        tools = Gtk.Box(spacing=3)
+        tools.append(star)
+        if copy:
+            cp = Gtk.Button(label="󰆏", focus_on_click=False, tooltip_text=i18n.tr("kopieren"), valign=Gtk.Align.CENTER)
+            cp.add_css_class("trx-dir")
+            cp.connect("clicked", lambda *_: self.copy(text, closing=False))
+            tools.append(cp)
+        rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_RIGHT, transition_duration=90, child=tools,
+                           reveal_child=saved)
+        row = Gtk.Box(spacing=3)
+        row.append(main)
+        row.append(rev)
+        m = Gtk.EventControllerMotion()
+        m.connect("enter", lambda *_: rev.set_reveal_child(True))
+        m.connect("leave", lambda *_: rev.set_reveal_child(star.get_label() == "★"))
+        row.add_controller(m)
+        return row
+
+    # ---------- Seiten: gemerkte Wörter / üben ----------
+    def show_page(self, page, requeue=True):
+        self.page = page
+        self.learn = None
+        self.lang_mode = False
+        self.update_lang_ui()
+        if self.vocab_btn.get_active() != (page in ("vocab", "learn")):
+            self.vocab_btn.set_active(page in ("vocab", "learn"))
+        if requeue:
+            self.queue(0)
+
+    def render_vocab(self):
+        cards = vocab.vocab_list()
+        now = __import__("time").time()
+        due = sum(1 for c in cards if c.get("due", 0) <= now)
+        self.label(i18n.tr("gemerkte wörter ({})", len(cards)), "trx-sec")
+        if not cards:
+            self.label("Noch nichts gemerkt. Fahr bei einem Treffer mit der Maus darüber und klicke ☆.", "trx-empty")
+            return
+        bar = Gtk.Box(spacing=6)
+        learn = Gtk.Button(label=i18n.tr("󰑐 üben ({} fällig)", due), focus_on_click=False, sensitive=bool(due))
+        learn.add_css_class("trx-dir")
+        learn.connect("clicked", lambda *_: self.start_learning())
+        bar.append(learn)
+        tsv = Gtk.Button(label="󰆏 als tabelle kopieren", focus_on_click=False,
+                         tooltip_text="Vorderseite⇥Rückseite je Zeile – zum Einfügen in Anki oder Quizlet")
+        tsv.add_css_class("trx-dir")
+        tsv.connect("clicked", lambda *_: self.copy(vocab.vocab_tsv(), closing=False))
+        bar.append(tsv)
+        self.results.append(bar)
+        for c in cards:
+            row = Gtk.Box(spacing=4)
+            b = Gtk.Button(focus_on_click=False, hexpand=True, tooltip_text="Übersetzung kopieren")
+            b.add_css_class("trx-phrase")
+            inner = Gtk.Box(spacing=8)
+            inner.append(Gtk.Label(label=c["q"], xalign=0))
+            a = Gtk.Label(label="→ " + c["a"], xalign=0, hexpand=True, ellipsize=3)
+            a.add_css_class("trx-ctx")
+            inner.append(a)
+            box = Gtk.Label(label="●" * (c.get("box", 0) + 1), xalign=1)
+            box.add_css_class("trx-ctx")
+            box.set_tooltip_text("Lernstufe")
+            inner.append(box)
+            b.set_child(inner)
+            b.connect("clicked", lambda _b, t=c["a"]: self.copy(t, closing=False))
+            row.append(b)
+            x = Gtk.Button(label="󰅖", focus_on_click=False, tooltip_text="Vokabel löschen")
+            x.add_css_class("trx-dir")
+            x.connect("clicked", lambda _b, cc=c: (vocab.vocab_remove(cc["q"], cc["a"], cc.get("lang", "")), self.queue(0)))
+            row.append(x)
+            self.results.append(row)
+
+    def start_learning(self):
+        cards = vocab.vocab_due(20)
+        if not cards:
+            return
+        self.page = "learn"
+        self.learn = {"cards": cards, "i": 0, "shown": False, "known": 0}
+        self.queue(0)
+
+    def render_learn(self):
+        st = self.learn
+        if not st:
+            self.show_page("vocab")
+            return
+        i, cards = st["i"], st["cards"]
+        if i >= len(cards):
+            self.label(i18n.tr("geschafft: {} von {} gewusst", st["known"], len(cards)), "trx-sec")
+            self.label("Gewusste Karten kommen später wieder (1, 3, 7, 14, 30 Tage), die anderen gleich noch einmal.",
+                       "trx-empty")
+            b = Gtk.Button(label="zurück zu den wörtern", focus_on_click=False, halign=Gtk.Align.START)
+            b.add_css_class("trx-dir")
+            b.connect("clicked", lambda *_: self.show_page("vocab"))
+            self.results.append(b)
+            return
+        c = cards[i]
+        self.label(i18n.tr("karte {} / {}", i + 1, len(cards)), "trx-sec")
+        self.label(c["q"], "trx-card")
+        if not st["shown"]:
+            b = Gtk.Button(label="aufdecken ⏎", focus_on_click=False, halign=Gtk.Align.START)
+            b.add_css_class("trx-dir")
+            b.connect("clicked", lambda *_: self.learn_enter())
+            self.results.append(b)
+        else:
+            self.label(c["a"], "trx-card")
+            bar = Gtk.Box(spacing=6, margin_top=8)
+            for text, ok in (("✓ gewusst ⏎", True), ("✗ noch nicht", False)):
+                b = Gtk.Button(label=text, focus_on_click=False)
+                b.add_css_class("trx-dir")
+                b.connect("clicked", lambda _b, k=ok: self.learn_grade(k))
+                bar.append(b)
+            self.results.append(bar)
+
+    def learn_enter(self):
+        st = self.learn
+        if not st or st["i"] >= len(st["cards"]):
+            return
+        if not st["shown"]:
+            st["shown"] = True
+            self.queue(0)
+        else:
+            self.learn_grade(True)
+
+    def learn_grade(self, known):
+        st = self.learn
+        vocab.vocab_grade(st["cards"][st["i"]], known)
+        st["known"] += 1 if known else 0
+        st["i"] += 1
+        st["shown"] = False
+        self.queue(0)
 
     def copy(self, text, closing=True):
         self.get_clipboard().set(text)
