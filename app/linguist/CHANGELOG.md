@@ -1,5 +1,8 @@
 # linguist – Änderungen
 
+## 1.6.0 (2026-11-01)
+- **Scroll-Ende**: Wer am Ende einer Seite weiterscrollt, sieht aus der Kante einen Verlauf aus ░ ▒ ▓ █ aufsteigen, am Mauszeiger am höchsten. Die Liste bewegt sich dabei nicht und der Effekt läuft ohne Überschwingen aus. Er erscheint nur, wenn kein umgebendes Scroll-Fenster mehr weiterscrollen kann. Abschalten: `"scroll_end": false` in ~/.config/rice-apps/settings.json oder Energiesparmodus.
+
 ## 1.5.0 (2026-10-29)
 - **Verlauf**: Bei leerem Suchfeld stehen die zuletzt nachgeschlagenen Wörter samt erster Übersetzung da – ein Klick schlägt sie noch einmal nach, ✕ nimmt einen Eintrag heraus, „leeren“ löscht alles.
 - **Vokabeln**: Fährst du über einen Treffer, erscheint **☆** – ein Klick merkt ihn (★). Der Stern oben rechts zeigt alle gemerkten Wörter, kopiert sie als Tabelle (für Anki/Quizlet) und startet **Karteikarten**: aufdecken, „gewusst“ → die Karte kommt nach 1, 3, 7, 14, 30 Tagen wieder, „noch nicht“ gleich nochmal.
